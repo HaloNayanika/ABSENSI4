@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Absensi PMR</title>
+<style>
+:root{--bg:#fff;--sf:#f6f4f4;--tx:#1f1a1a;--mu:#756b6b;--ac:#c62828;--bd:#e3dcdc}
+@media(prefers-color-scheme:dark){:root{--bg:#161212;--sf:#231d1d;--tx:#f3eded;--mu:#a89c9c;--ac:#ef5350;--bd:#3a3030}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--ac);color:#fff;gap:8px;flex-wrap:wrap}
+.st{font-size:12px;padding:2px 8px;border-radius:99px;background:rgba(255,255,255,.25)}
+main{max-width:900px;margin:0 auto;padding:14px}nav{display:flex;gap:6px;overflow-x:auto;margin-bottom:14px}
+nav button,.btn{border:1px solid var(--bd);background:var(--sf);color:var(--tx);padding:8px 12px;border-radius:8px;cursor:pointer;font:inherit;white-space:nowrap}
+nav button.on,.btn.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--sf);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:12px}
+input,textarea,select{width:100%;padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit;margin:4px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:130px}.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse}td,th{padding:7px;border-bottom:1px solid var(--bd);text-align:left}
+.mu{color:var(--mu);font-size:13px}.qr{display:inline-block;background:#fff;padding:8px;border-radius:8px;margin:6px;text-align:center;color:#000;font-size:12px}
+.mt{padding:12px;border:1px solid var(--bd);border-radius:8px;margin-bottom:8px;background:var(--bg)}.mt.lk{opacity:.5}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.grid img,.grid video{width:100%;height:110px;object-fit:cover;border-radius:8px}
+video#cam{width:100%;max-width:340px;border-radius:8px;background:#000}.ok{color:green;font-weight:600}.bad{color:var(--ac);font-weight:600}
+</style></head><body>
+<header><b>🩺 Absensi PMR</b><span><span class="st" id="net"></span> <span id="who"></span> <button class="btn" id="out" style="display:none;padding:4px 10px" onclick="logout()">Keluar</button></span></header>
+<main id="app"></main>
+<script>window.onerror=function(m,s,l){document.getElementById('app').innerHTML='<pre style="white-space:pre-wrap;color:#c62828;padding:12px">ERROR: '+m+' (baris '+l+')</pre>'};document.getElementById('app').innerHTML='<p style="padding:12px">Memuat aplikasi (v3)...</p>';</script>
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script><script async src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script>
+const GAS=true,API='';
+const LS=(()=>{try{localStorage.setItem('x','1');localStorage.removeItem('x');return localStorage}catch(e){return{removeItem(k){delete this[k]}}}})();
+const call=req=>GAS?new Promise((ok,no)=>google.script.run.withSuccessHandler(r=>ok(JSON.parse(r))).withFailureHandler(e=>no(new TypeError(e&&e.message||'offline'))).handle(JSON.stringify(req))):fetch(API,{method:'POST',body:JSON.stringify(req)}).then(r=>r.json());
+if(!GAS&&'serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+const $=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const rp=n=>'Rp '+Number(n).toLocaleString('id-ID');
+let tok=LS.tok||'',me=JSON.parse(LS.me||'null'),tab='',stream=null,off=false,cur=null,M=[];
+async function api(path,o={}){const key='c:'+(me?me.id:0)+path;
+ try{const j=await call({p:path,m:o.m||'GET',t:tok,b:o.b});
+  if(j.s===401&&path!=='/login'){logout();throw Error('Sesi habis, silakan login lagi')}
+  if(j.s>=400)throw Error(j.d.err||'Error');off=false;if(!o.m)try{LS[key]=JSON.stringify(j.d)}catch{}netUI();return j.d}
+ catch(e){if(e instanceof TypeError){off=true;netUI();if(!o.m&&LS[key])return JSON.parse(LS[key]);throw Error('Sedang offline atau server tidak terjangkau. Fitur ini perlu internet.')}throw e}}
+const go=async(f)=>{try{await f()}catch(e){alert(e.message)}};
+function netUI(){$('net').textContent=(navigator.onLine&&!off)?'● Online':'○ Offline (data tersimpan)'}
+addEventListener('online',()=>{off=false;netUI();if(me)V[tab]()});addEventListener('offline',netUI);netUI();
+const tabs={ketua:['ringkas','absen','materi','kas','dok','pesan'],sekretaris:['siswa','scan','absen','materi','qrsaya'],bendahara:['kas'],admin:['pesan'],dokumentasi:['dok'],siswa:['materi','riwayat','qrsaya','pesan']};
+const lbl={ringkas:'Ringkasan',absen:'Kehadiran',materi:'Materi',kas:'Kas',dok:'Dokumentasi',pesan:'Pesan / CS',siswa:'Data Siswa',scan:'Scan QR',qrsaya:'QR Saya',riwayat:'Riwayat'};
+async function login(){await go(async()=>{const j=await api('/login',{m:'POST',b:{u:$('u').value,p:$('p').value}});tok=j.token;me=j.user;LS.tok=tok;LS.me=JSON.stringify(me);tab=tabs[me.role][0];draw()})}
+function logout(){stopCam();tok='';me=null;LS.removeItem('tok');LS.removeItem('me');draw()}
+function draw(){$('who').textContent=me?me.n+' ('+me.role+')':'';$('out').style.display=me?'':'none';
+ if(!me){$('app').innerHTML=`<div class="card" style="max-width:340px;margin:30px auto"><h3>Masuk</h3><input id="u" placeholder="Nama / NISN"><input id="p" type="password" placeholder="Password (siswa: NISN)"><button class="btn p" style="width:100%" onclick="login()">Masuk</button><p class="mu">Staf awal: ketua/ketua123, sekretaris/sekretaris123, bendahara/bendahara123, admin/admin123, dokumentasi/dok123. Segera ganti di tab Ringkasan/Akun.</p></div>`;return}
+ if(!tab||!tabs[me.role].includes(tab))tab=tabs[me.role][0];stopCam();
+ $('app').innerHTML='<nav>'+tabs[me.role].map(t=>`<button class="${t===tab?'on':''}" onclick="tab='${t}';draw()">${lbl[t]}</button>`).join('')+'<button onclick="chPass()">Ganti password</button></nav><div id="v"></div>';go(V[tab])}
+function chPass(){const p=prompt('Password baru (min 4 karakter)');if(p)go(async()=>{await api('/pass',{m:'POST',b:{p}});alert('Password diganti')})}
+const V={};
+const qrUrl=t=>{if(typeof qrcode==='undefined')return '';const q=qrcode(0,'M');q.addData(t);q.make();return q.createDataURL(6,8)};
+const qrBox=(n,c)=>`<div class="qr"><img src="${qrUrl(c)}" alt="QR"><div>${esc(n)}<br>${esc(c)}</div><a href="${qrUrl(c)}" download="QR-${esc(n)}.gif">Unduh</a></div>`;
+
+V.siswa=async()=>{const L=await api('/siswa');$('v').innerHTML=`<div class="card"><h3>Tambah satu siswa</h3><div class="row"><input id="nm" placeholder="Nama"><input id="ni" placeholder="NISN (jadi password)"></div><button class="btn p" onclick="addS([{n:$('nm').value,nisn:$('ni').value}])">Tambah & buat QR</button></div>
+<div class="card"><h3>Tambah banyak sekaligus</h3><p class="mu">Satu baris satu siswa: Nama,NISN</p><textarea id="bulk" rows="5" placeholder="Andi Pratama,0012345678&#10;Siti Aisyah,0012345679"></textarea><button class="btn p" onclick="addS($('bulk').value.split('\\n').map(l=>{const i=l.lastIndexOf(',');return{n:l.slice(0,i),nisn:l.slice(i+1)}}))">Tambah semua</button></div>
+<div class="card"><h3>Daftar & QR (${L.length})</h3>${L.map(s=>qrBox(s.n,s.nisn)+`<button onclick="delS('${esc(s.nisn)}')">Hapus ${esc(s.n)}</button>`).join('')}</div>`}
+const addS=l=>go(async()=>{const r=await api('/siswa',{m:'POST',b:{list:l}});alert(r.added+' siswa ditambahkan (NISN kembar/kosong dilewati)');V.siswa()});
+const delS=n=>{if(confirm('Hapus siswa ini?'))go(async()=>{await api('/siswa/'+encodeURIComponent(n),{m:'DELETE'});V.siswa()})};
+V.qrsaya=async()=>{$('v').innerHTML=`<div class="card" style="text-align:center"><h3>QR Saya</h3>${me.nisn?qrBox(me.n,me.nisn):'Akun ini tidak punya QR'}</div>`};
+
+let last='',beep=()=>{try{const a=new AudioContext(),o=a.createOscillator();o.connect(a.destination);o.frequency.value=880;o.start();setTimeout(()=>o.stop(),120)}catch{}};
+V.scan=async()=>{const L=await api('/siswa');$('v').innerHTML=`<div class="card"><h3>Scan QR siswa</h3><video id="cam" playsinline muted></video><br><button class="btn p" onclick="startCam()">Buka kamera</button><p class="mu">Kalau kamera live diblokir, foto QR-nya:</p><input type="file" accept="image/*" capture="environment" onchange="scanPhoto(this)"><p id="res" class="mu">Arahkan QR siswa ke kamera.</p></div>
+<div class="card"><h3>Absen manual (siswa tanpa HP)</h3><select id="ms">${L.map(s=>`<option value="${esc(s.nisn)}">${esc(s.n)}</option>`).join('')}</select><button class="btn p" onclick="manual()">Hadirkan</button><p id="res2"></p></div>`};
+async function sendScan(n,by,el){try{const r=await api('/scan',{m:'POST',b:{nisn:n,by}});el.className=r.ok?'ok':'bad';el.textContent=r.msg;if(r.ok)beep()}catch(e){el.className='bad';el.textContent=e.message}}
+function scanPhoto(el){const f=el.files[0];if(!f)return;const img=new Image();img.onload=()=>{const c=document.createElement('canvas'),s=Math.min(1,1200/Math.max(img.width,img.height));c.width=img.width*s;c.height=img.height*s;const x=c.getContext('2d');x.drawImage(img,0,0,c.width,c.height);
+ const r=jsQR(x.getImageData(0,0,c.width,c.height).data,c.width,c.height);if(r&&r.data)sendScan(r.data,'scan',$('res'));else{$('res').className='bad';$('res').textContent='QR tidak terbaca, coba foto lebih dekat & terang.'}el.value=''};img.src=URL.createObjectURL(f)}
+const manual=()=>sendScan($('ms').value,'manual',$('res2'));
+async function startCam(){if(!navigator.mediaDevices){$('res').textContent='Kamera butuh HTTPS atau localhost. Lihat README.';return}
+ try{stopCam();stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});const v=$('cam');v.srcObject=stream;await v.play();
+ const c=document.createElement('canvas'),x=c.getContext('2d',{willReadFrequently:true});
+ (function loop(){if(!stream)return;if(v.videoWidth){c.width=v.videoWidth;c.height=v.videoHeight;x.drawImage(v,0,0);const r=jsQR(x.getImageData(0,0,c.width,c.height).data,c.width,c.height);
+  if(r&&r.data&&r.data!==last){last=r.data;sendScan(r.data,'scan',$('res'));setTimeout(()=>last='',3000)}}requestAnimationFrame(loop)})()}
+ catch(e){$('res').textContent='Kamera gagal dibuka ('+e.name+'). Izinkan kamera di browser, atau pakai absen manual.'}}
+function stopCam(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
+
+V.absen=async()=>{const A=await api('/att');$('v').innerHTML=`<div class="card"><h3>Data kehadiran (${A.length})</h3><div class="tw"><table><tr><th>Tanggal</th><th>Jam</th><th>Nama</th><th>Via</th></tr>${A.map(a=>`<tr><td>${a.d}</td><td>${a.t}</td><td>${esc(a.n)}</td><td>${a.by}</td></tr>`).join('')||'<tr><td colspan=4 class="mu">Belum ada</td></tr>'}</table></div></div>`};
+V.riwayat=async()=>{const A=await api('/att');$('v').innerHTML=`<div class="card"><h3>Riwayat kehadiran (${A.length}x hadir)</h3><table>${A.map(x=>`<tr><td>${x.d}</td><td>${x.t}</td></tr>`).join('')||'<tr><td class="mu">Belum ada</td></tr>'}</table></div>`};
+
+V.materi=async()=>{M=await api('/materi');const ed=['ketua','sekretaris'].includes(me.role);
+ $('v').innerHTML=(ed?`<div class="card"><h3>Tambah materi</h3><input id="mt" placeholder="Judul"><textarea id="mb" rows="4" placeholder="Isi materi"></textarea><button class="btn p" onclick="addM()">Tambah (terkunci)</button></div>`:'')+
+ M.map(m=>`<div class="mt ${m.lock&&me.role==='siswa'?'lk':''}" id="m${m.id}"><b>${esc(m.t)}</b> ${m.lock?'🔒':'🔓'}
+ ${ed?`<div style="float:right"><button class="btn" onclick="editM(${m.id})">Edit</button> ${me.role==='ketua'?`<button class="btn" onclick="lockM(${m.id},${!m.lock})">${m.lock?'Buka':'Kunci'}</button>`:''}</div>`:''}
+ ${m.lock&&me.role==='siswa'?'<div class="mu">Belum dibuka ketua</div>':`<div style="white-space:pre-wrap;margin-top:6px">${esc(m.body)}</div>`}</div>`).join('')};
+const addM=()=>go(async()=>{await api('/materi',{m:'POST',b:{t:$('mt').value,body:$('mb').value}});V.materi()});
+const lockM=(id,lock)=>go(async()=>{await api('/materi/'+id,{m:'PUT',b:{lock}});V.materi()});
+function editM(id){const m=M.find(x=>x.id===id);$('m'+id).innerHTML=`<input id="et" value="${esc(m.t)}"><textarea id="eb" rows="8">${esc(m.body)}</textarea><button class="btn p" onclick="saveM(${id})">Simpan</button> <button class="btn" onclick="V.materi()">Batal</button>`}
+const saveM=id=>go(async()=>{await api('/materi/'+id,{m:'PUT',b:{t:$('et').value,body:$('eb').value}});V.materi()});
+
+V.kas=async()=>{const K=await api('/kas'),bd=me.role==='bendahara',i=K.filter(k=>k.type==='in').reduce((a,k)=>a+k.amt,0),o=K.filter(k=>k.type==='out').reduce((a,k)=>a+k.amt,0);
+ $('v').innerHTML=(bd?`<div class="card"><h3>Catat kas</h3><div class="row"><select id="kt"><option value="in">Pemasukan</option><option value="out">Pengeluaran</option></select><input id="ka" type="number" placeholder="Jumlah"><input id="kn" placeholder="Keterangan"></div><button class="btn p" onclick="addK()">Simpan</button></div>`:'')+
+ `<div class="card"><h3>Saldo: ${rp(i-o)}</h3><p class="mu">Masuk ${rp(i)} · Keluar ${rp(o)}</p><div class="tw"><table>${K.slice().reverse().map(k=>`<tr><td>${k.d}</td><td>${esc(k.note)}</td><td class="${k.type==='in'?'ok':'bad'}">${k.type==='in'?'+':'-'}${rp(k.amt)}</td></tr>`).join('')}</table></div></div>`};
+const addK=()=>go(async()=>{await api('/kas',{m:'POST',b:{type:$('kt').value,amt:$('ka').value,note:$('kn').value}});V.kas()});
+
+V.pesan=async()=>{const P=await api('/msgs'),ad=me.role==='admin',sw=me.role==='siswa';
+ $('v').innerHTML=(sw?`<div class="card"><h3>Hubungi admin</h3><textarea id="pt" rows="3" placeholder="Tulis pertanyaan / kendala"></textarea><button class="btn p" onclick="sendP()">Kirim</button></div>`:'')+
+ `<div class="card"><h3>Pesan</h3>${P.slice().reverse().map(m=>`<div class="mt"><b>${esc(m.from)}</b> <span class="mu">${m.d}</span><br>${esc(m.text)}${m.reply?`<br><i>Balasan: ${esc(m.reply)}</i>`:ad?`<br><input id="r${m.id}" placeholder="Balas"><button class="btn" onclick="rep(${m.id})">Kirim</button>`:''}</div>`).join('')||'<p class="mu">Belum ada pesan</p>'}</div>`};
+const sendP=()=>go(async()=>{await api('/msgs',{m:'POST',b:{text:$('pt').value}});V.pesan()});
+const rep=id=>go(async()=>{await api('/msgs/'+id,{m:'PUT',b:{reply:$('r'+id).value}});V.pesan()});
+
+V.dok=async()=>{const ed=me.role==='dokumentasi';
+ if(!cur){const F=await api('/folders');$('v').innerHTML=(ed?`<div class="card"><h3>Folder baru (per kumpulan)</h3><div class="row"><input id="fn" placeholder="Mis. Latihan 8 Nov 2026"><button class="btn p" onclick="addF()">Buat</button></div></div>`:'')+`<div class="grid">${F.map(f=>`<button class="card" onclick="cur=${f.id};cn='${esc(f.name)}';V.dok()">📁 ${esc(f.name)}<br><span class="mu">${f.count} berkas</span></button>`).join('')}</div><p class="mu">Folder & berkas bersifat permanen: tidak ada fitur hapus.</p>`;return}
+ const Fl=await api('/folders/'+cur+'/files');$('v').innerHTML=`<button class="btn" onclick="cur=null;V.dok()">← Kembali</button><div class="card"><h3>📁 ${esc(cn)}</h3>${ed?'<input id="up" type="file" accept="image/*,video/*" multiple onchange="upl(this)"><p id="ups" class="mu"></p>':''}<div class="grid">${Fl.map(f=>f.type.startsWith('video')?`<iframe src="https://drive.google.com/file/d/${f.driveId}/preview" style="width:100%;height:130px;border:0;border-radius:8px" allowfullscreen></iframe>`:`<img src="https://drive.google.com/thumbnail?id=${f.driveId}&sz=w600" alt="${esc(f.n)}" loading="lazy">`).join('')}</div></div>`};
+let cn='';
+const addF=()=>go(async()=>{await api('/folders',{m:'POST',b:{name:$('fn').value}});V.dok()});
+async function upl(el){go(async()=>{let i=0;for(const f of el.files){if(f.size>15e6)throw Error(f.name+' lebih dari 15 MB. Kecilkan dulu / potong videonya.');$('ups').textContent=`Mengunggah ${++i}/${el.files.length}: ${f.name}`;
+ const data=await new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(r.result.split(',')[1]);r.onerror=no;r.readAsDataURL(f)});
+ await api('/upload',{m:'POST',b:{folder:cur,name:f.name,type:f.type,data}})}V.dok()})}
+
+V.ringkas=async()=>{const [S,A,K,mt]=await Promise.all([api('/siswa'),api('/att'),api('/kas'),api('/materi')]);const t=new Date(Date.now()+7*36e5).toISOString().slice(0,10),sd=K.reduce((a,k)=>a+(k.type==='in'?k.amt:-k.amt),0);
+ $('v').innerHTML=`<div class="grid"><div class="card"><b>${S.length}</b><br>Anggota</div><div class="card"><b>${A.filter(a=>a.d===t).length}</b><br>Hadir hari ini</div><div class="card"><b>${A.length}</b><br>Total absensi</div><div class="card"><b>${rp(sd)}</b><br>Saldo kas</div><div class="card"><b>${mt.filter(m=>!m.lock).length}/${mt.length}</b><br>Materi terbuka</div></div><p class="mu">Buka tab lain untuk detail; tab Materi untuk edit/kunci materi.</p>`};
+if(me)draw();else draw();
+</script></body></html>
